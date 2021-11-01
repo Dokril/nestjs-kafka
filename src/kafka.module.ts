@@ -1,6 +1,10 @@
 import { Module, DynamicModule, Global, Provider } from '@nestjs/common';
 import { KafkaService } from './kafka.service';
-import { KafkaModuleOption, KafkaModuleOptionsAsync, KafkaOptionsFactory } from './interfaces';
+import {
+  KafkaModuleOption,
+  KafkaModuleOptionsAsync,
+  KafkaOptionsFactory,
+} from './interfaces';
 import { KafkaModuleOptionsProvider } from './kafka-module-options.provider';
 import { KAFKA_MODULE_OPTIONS } from './constants';
 
@@ -10,7 +14,7 @@ export class KafkaModule {
   static register(options: KafkaModuleOption[]): DynamicModule {
     const clients = (options || []).map((item) => ({
       provide: item.name,
-      useValue: new KafkaService(item.options),
+      useValue: new KafkaService(item),
     }));
 
     return {
@@ -39,7 +43,8 @@ export class KafkaModule {
       });
     }
 
-    const createKafkaModuleOptionsProvider = this.createKafkaModuleOptionsProvider(connectOptions);
+    const createKafkaModuleOptionsProvider =
+      this.createKafkaModuleOptionsProvider(connectOptions);
 
     return {
       module: KafkaModule,
@@ -49,10 +54,7 @@ export class KafkaModule {
         KafkaModuleOptionsProvider,
         ...clients,
       ],
-      exports: [
-        createKafkaModuleOptionsProvider,
-        ...clients,
-      ],
+      exports: [createKafkaModuleOptionsProvider, ...clients],
     };
   }
 

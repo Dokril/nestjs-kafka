@@ -9,7 +9,7 @@ import {
   Transaction,
   RecordMetadata,
 } from 'kafkajs';
-import { ModuleMetadata, Type } from '@nestjs/common';
+import { LoggerService, ModuleMetadata, Type } from '@nestjs/common';
 
 export interface IHeaders {
   [key: string]: any;
@@ -34,6 +34,7 @@ export interface KafkaModuleOption {
     seek?: Record<string, number | 'earliest' | Date>;
     autoConnect?: boolean;
   };
+  logger?: LoggerService;
 }
 export interface KafkaMessageObject extends Message {
   value: any | Buffer | string | null;

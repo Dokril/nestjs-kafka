@@ -1,4 +1,10 @@
-import { Injectable, OnModuleDestroy, OnModuleInit } from "@nestjs/common";
+import {
+  Injectable,
+  Logger,
+  LoggerService,
+  OnModuleDestroy,
+  OnModuleInit,
+} from '@nestjs/common';
 import {
   Consumer,
   Kafka,
@@ -9,21 +15,20 @@ import {
   TopicPartitionOffsetAndMetadata,
   Offsets,
 } from 'kafkajs';
-import { Deserializer, Serializer } from "@nestjs/microservices";
-import { Logger } from "@nestjs/common/services/logger.service";
-import { KafkaLogger } from "@nestjs/microservices/helpers/kafka-logger";
-import { KafkaResponseDeserializer } from "./deserializer/kafka-response.deserializer";
-import { KafkaRequestSerializer } from "./serializer/kafka-request.serializer";
-import { KafkaModuleOption, KafkaMessageSend, KafkaTransaction } from './interfaces';
-
+import { Deserializer, Serializer } from '@nestjs/microservices';
+import { KafkaLogger } from '@nestjs/microservices/helpers/kafka-logger';
+import { KafkaResponseDeserializer } from './deserializer/kafka-response.deserializer';
+import { KafkaRequestSerializer } from './serializer/kafka-request.serializer';
 import {
-  SUBSCRIBER_MAP,
-  SUBSCRIBER_OBJECT_MAP
-} from './kafka.decorator';
+  KafkaModuleOption,
+  KafkaMessageSend,
+  KafkaTransaction,
+} from './interfaces';
+
+import { SUBSCRIBER_MAP, SUBSCRIBER_OBJECT_MAP } from './kafka.decorator';
 
 @Injectable()
 export class KafkaService implements OnModuleInit, OnModuleDestroy {
-
   private kafka: Kafka;
   private producer: Producer;
   private consumer: Consumer;
@@ -32,23 +37,25 @@ export class KafkaService implements OnModuleInit, OnModuleDestroy {
   private serializer: Serializer;
   private autoConnect: boolean;
   private options: KafkaModuleOption['options'];
+  private logger: LoggerService;
 
-  protected topicOffsets: Map<string, (SeekEntry & { high: string; low: string })[]> = new Map();
-  
-  protected logger = new Logger(KafkaService.name);
+  protected topicOffsets: Map<
+    string,
+    (SeekEntry & { high: string; low: string })[]
+  > = new Map();
 
-  constructor(
-    options: KafkaModuleOption['options']
-  ) {
-    const { 
+  constructor(options: KafkaModuleOption) {
+    const {
       client,
       consumer: consumerConfig,
       producer: producerConfig,
-    } = options;
+      autoConnect,
+    } = options.options;
 
+    this.logger = options.logger ? options.logger : new Logger();
     this.kafka = new Kafka({
       ...client,
-      logCreator: KafkaLogger.bind(null, this.logger)
+      logCreator: KafkaLogger.bind(null, this.logger),
     });
 
     const { groupId } = consumerConfig;
@@ -56,17 +63,17 @@ export class KafkaService implements OnModuleInit, OnModuleDestroy {
       {
         groupId: this.getGroupIdSuffix(groupId),
       },
-      consumerConfig
+      consumerConfig,
     );
-    
-    this.autoConnect = options.autoConnect ?? true;
+
+    this.autoConnect = autoConnect ?? true;
     this.consumer = this.kafka.consumer(consumerOptions);
     this.producer = this.kafka.producer(producerConfig);
     this.admin = this.kafka.admin();
 
-    this.initializeDeserializer(options);
-    this.initializeSerializer(options);
-    this.options = options;
+    this.initializeDeserializer(options.options);
+    this.initializeSerializer(options.options);
+    this.options = options.options;
   }
 
   async onModuleInit(): Promise<void> {
@@ -90,7 +97,7 @@ export class KafkaService implements OnModuleInit, OnModuleDestroy {
       return;
     }
 
-    await this.producer.connect()
+    await this.producer.connect();
     await this.consumer.connect();
     await this.admin.connect();
   }
@@ -122,38 +129,38 @@ export class KafkaService implements OnModuleInit, OnModuleDestroy {
 
   /**
    * Subscribes to the topics.
-   * 
-   * @param topic 
+   *
+   * @param topic
    */
   private async subscribe(topic: string): Promise<void> {
     await this.consumer.subscribe({
       topic,
-      fromBeginning: this.options.consumeFromBeginning || false
+      fromBeginning: this.options.consumeFromBeginning || false,
     });
   }
-  
+
   /**
    * Send/produce a message to a topic.
-   * 
-   * @param message 
+   *
+   * @param message
    */
   async send(message: KafkaMessageSend): Promise<RecordMetadata[]> {
     if (!this.producer) {
-      this.logger.error('There is no producer, unable to send message.')
+      this.logger.error('There is no producer, unable to send message.');
       return;
     }
 
     const serializedPacket = await this.serializer.serialize(message);
 
-    // @todo - rather than have a producerRecord, 
+    // @todo - rather than have a producerRecord,
     // most of this can be done when we create the controller.
     return await this.producer.send(serializedPacket);
   }
 
   /**
    * Gets the groupId suffix for the consumer.
-   * 
-   * @param groupId 
+   *
+   * @param groupId
    */
   public getGroupIdSuffix(groupId: string): string {
     return groupId + '-client';
@@ -161,10 +168,10 @@ export class KafkaService implements OnModuleInit, OnModuleDestroy {
 
   /**
    * Calls the method you are subscribed to.
-   * 
+   *
    * @param topic
    *  The topic to subscribe to.
-   * @param instance 
+   * @param instance
    *  The class instance.
    */
   subscribeToResponseOf<T>(topic: string, instance: T): void {
@@ -197,7 +204,9 @@ export class KafkaService implements OnModuleInit, OnModuleDestroy {
         const serializedPacket = await this.serializer.serialize(message);
         return await tx.send(serializedPacket);
       },
-      sendOffsets(offsets: Offsets & { consumerGroupId: string }): Promise<void> {
+      sendOffsets(
+        offsets: Offsets & { consumerGroupId: string },
+      ): Promise<void> {
         return tx.sendOffsets(offsets);
       },
     };
@@ -211,33 +220,41 @@ export class KafkaService implements OnModuleInit, OnModuleDestroy {
    *
    * @param topicPartitions
    */
-  async commitOffsets(topicPartitions: Array<TopicPartitionOffsetAndMetadata>): Promise<void> {
+  async commitOffsets(
+    topicPartitions: Array<TopicPartitionOffsetAndMetadata>,
+  ): Promise<void> {
     return this.consumer.commitOffsets(topicPartitions);
   }
 
   /**
    * Sets up the serializer to encode outgoing messages.
-   * 
-   * @param options 
+   *
+   * @param options
    */
   protected initializeSerializer(options: KafkaModuleOption['options']): void {
-    this.serializer = (options && options.serializer) || new KafkaRequestSerializer();
+    this.serializer =
+      (options && options.serializer) || new KafkaRequestSerializer();
   }
 
   /**
    * Sets up the deserializer to decode incoming messages.
-   * 
-   * @param options 
+   *
+   * @param options
    */
-  protected initializeDeserializer(options: KafkaModuleOption['options']): void {
-    this.deserializer = (options && options.deserializer) || new KafkaResponseDeserializer();
+  protected initializeDeserializer(
+    options: KafkaModuleOption['options'],
+  ): void {
+    this.deserializer =
+      (options && options.deserializer) || new KafkaResponseDeserializer();
   }
 
   /**
    * Runs the consumer and calls the consumers when a message arrives.
    */
   private bindAllTopicToConsumer(): void {
-    const runConfig = (this.options.consumerRunConfig) ? this.options.consumerRunConfig : {};
+    const runConfig = this.options.consumerRunConfig
+      ? this.options.consumerRunConfig
+      : {};
     this.consumer.run({
       ...runConfig,
       eachMessage: async ({ topic, partition, message }) => {
@@ -245,9 +262,17 @@ export class KafkaService implements OnModuleInit, OnModuleDestroy {
         const callback = SUBSCRIBER_MAP.get(topic);
 
         try {
-          const { timestamp, response, offset, key, headers } = await this.deserializer.deserialize(message, { topic });
-          await callback.apply(objectRef, [response, key, offset, timestamp, partition, headers]);
-        } catch(e) {
+          const { timestamp, response, offset, key, headers } =
+            await this.deserializer.deserialize(message, { topic });
+          await callback.apply(objectRef, [
+            response,
+            key,
+            offset,
+            timestamp,
+            partition,
+            headers,
+          ]);
+        } catch (e) {
           this.logger.error(`Error for message ${topic}: ${e}`);
 
           // Log and throw to ensure we don't keep processing the messages when there is an error.
@@ -287,9 +312,9 @@ export class KafkaService implements OnModuleInit, OnModuleDestroy {
         this.consumer.seek({
           topic,
           partition: topicOffset.partition,
-          offset: seek
+          offset: seek,
         });
-      })
-    })
+      });
+    });
   }
 }
